@@ -22,6 +22,7 @@ public static class Libraries
     public const string Lz32 = "lz32.dll";
     public const string Ntdll = "ntdll.dll";
     public const string Netapi32 = "netapi32.dll";
+    public const string Oleacc = "oleacc.dll";
     public const string Ole32 = "ole32.dll";
     public const string OleAut32 = "oleaut32.dll";
     public const string PropSys = "propsys.dll";

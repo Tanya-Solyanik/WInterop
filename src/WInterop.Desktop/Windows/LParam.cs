@@ -1,6 +1,7 @@
 ﻿// Copyright (c) Jeremy W. Kuhne. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
+using WInterop.Accessibility;
 using WInterop.Support;
 
 namespace WInterop.Windows;
@@ -31,6 +32,10 @@ public struct LParam
     public static unsafe implicit operator LParam(void* value) => new((nint)value);
     public static unsafe explicit operator WindowHandle(LParam value) => new HWND((void*)value.Value);
     public static unsafe explicit operator LParam(WindowHandle value) => new((nint)value.HWND.Value);
+
+    public static implicit operator ObjectIdentifier(LParam value)
+        => (ObjectIdentifier)(uint)value.Value;
+    public static implicit operator LParam(ObjectIdentifier value) => (nint)(uint)value;
 
     public override string ToString() => Value.ToString();
 }
