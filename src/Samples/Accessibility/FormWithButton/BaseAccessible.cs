@@ -8,7 +8,10 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using TerraFX.Interop.Windows;
 using WInterop.Accessibility.Native;
+using WInterop.Errors;
 
 namespace WInterop.Accessibility;
 
@@ -24,27 +27,22 @@ internal class BaseAccessible : IAccessible
     [AllowNull]
     private AccessibleObject _accessibleObject;
 
-    // This trick is not used because we return our internal type.
+    private static int ChildIdToInt(object childId)
+    {
+        // TODO: not a VT_I4 should return E_INVALIDARG
+        int id = childId is int @int
+            ? @int
+            : Oleacc.CHILDID_SELF;
 
-    // Get the constructor (currently internal) that allows wrapping AccessibleObject around IAccessible.
-    private static readonly ConstructorInfo s_accessibleConstructor
-        = typeof(AccessibleObject).GetConstructor(
-            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public,
-            // Default binder
-            binder: null,
-            new[] { typeof(IAccessible) },
-            modifiers: null)
-        ?? throw new InvalidOperationException($"Constructor for {nameof(AccessibleObject)} not available.");
+        if (id == DISP_E_PARAMNOTFOUND)
+        {
+            id = Oleacc.CHILDID_SELF;
+        }
 
-    /// <summary>
-    ///  Pass our experimental implementation of IAccessible into the .NET's Accessible object wrapper.
-    /// </summary>
-    /// <returns>The framework wrapper.</returns>
-    [MemberNotNull(nameof(_accessibleObject))]
-    public AccessibleObject AsAccessibleObject()
-        => _accessibleObject ??= (AccessibleObject)s_accessibleConstructor.Invoke(new[] { (object)this });
+        return id;
+    }
 
-    public virtual int GetChildCount() => -1;
+    public virtual int GetChildCount() => 0;
 
     /// <summary>
     ///  The IAccessible::get_accChildCount method retrieves the number of children that belong to this object.
@@ -60,29 +58,40 @@ internal class BaseAccessible : IAccessible
         }
     }
 
-    /// <summary>
-    ///  When overridden in a derived class, gets the accessible child corresponding to the specified identifier.
-    /// </summary>
-    /// <remarks>
-    ///  <para>
-    ///   Unlike <see cref="AccessibleObject"/> we do not decrement the identifier and treat it like an index.
-    ///  </para>
-    ///  <para>
-    ///   Note that the default <see cref="Control.ControlAccessibleObject"/> does NOT override this so it does not
-    ///   support navigating children by index. <see cref="ListBox"/>, <see cref="TabControl"/> and other "indexable"
-    ///   controls implement this pattern.
-    ///  </para>
-    /// </remarks>
-    public virtual BaseAccessible? GetChild(int childId) => null;
+    // Difference from the GetChild method is that this method can return a simple element index.
+    protected virtual bool IsChildElement(int childId) => false;
 
     // TODO: if the child is not an accessible object, but an element, it should be represented by the parent and
     // this method should throw COMException(S_FALSE)
     // https://learn.microsoft.com/windows/win32/api/oleacc/nf-oleacc-iaccessible-get_accchild#return-value
     object? IAccessible.get_accChild(object childID)
     {
-        var child = GetAccessibleObject(childID);
-        Trace($"Child {child?.ToString() ?? "<null>"}");
-        return child;
+        int id = ChildIdToInt(childID);
+        object? child;
+        if (id == Oleacc.CHILDID_SELF)
+        {
+            child = this;
+            Trace($"Child {child?.ToString() ?? "<null>"}");
+        }
+        else if (IsChildElement(id))
+        {
+            Trace($"Child {id} is a known element.");
+
+            var e = new COMException("This is a simple element.", errorCode: (int)HResult.S_FALSE)
+            {
+                HResult = (int)HResult.S_FALSE
+            };
+            throw e;
+        }
+
+        Trace($"Invalid child id {childID ?? "<null>"}");
+        
+        // E_INVALIDARG
+        // https://learn.microsoft.com/dotnet/framework/interop/how-to-map-hresults-and-exceptions
+#pragma warning disable CA2208
+        // Argument name matches that in the native IAccessible definition.
+        throw new ArgumentException($"Invalid child id {childID??"<null>"}.", "varChild");
+#pragma warning restore CA2208
     }
 
     /// <summary>
@@ -93,22 +102,10 @@ internal class BaseAccessible : IAccessible
     /// <summary>
     ///  Return the child object at the given screen coordinates.
     /// </summary>
-    public virtual BaseAccessible? HitTest(int x, int y)
+    // TODO: object - because I want to return element id.
+    public virtual object? HitTest(int x, int y)
     {
-        // If we have children, return the first one successfully hit tested.
-        int count = GetChildCount();
-        if (count >= 0)
-        {
-            for (int index = 0; index < count; ++index)
-            {
-                if (GetChild(index)?.HitTest(x, y) is { } accessible)
-                {
-                    return accessible;
-                }
-            }
-        }
-
-        return Bounds.Contains(x, y) ? this : null;
+        return Bounds.Contains(x, y) ? Oleacc.CHILDID_SELF : null;
     }
 
     /// <devdoc>
@@ -121,30 +118,20 @@ internal class BaseAccessible : IAccessible
     /// </devdoc>
     object? IAccessible.accHitTest(int xLeft, int yTop)
     {
-        object? hit = null;
-
-        if (HitTest(xLeft, yTop) is { } accessible)
-        {
-            hit = AsVariant(accessible);
-        }
+        object? hit = HitTest(xLeft, yTop);
 
         Trace($"HitTest {hit?.ToString() ?? "<null>"}");
         return hit;
     }
 
     /// <summary>
-    ///  Returns the given accessible object or the identifier for "self" if accessible is this instance.
-    /// </summary>
-    private object? AsVariant(IAccessible? accessible) => accessible == this ? Oleacc.CHILDID_SELF : accessible;
-
-    /// <summary>
     ///  Gets the default action for an object.
     /// </summary>
-    public virtual string? DefaultAction => null;
+    public virtual string? DefaultAction(int id) => null;
 
     string? IAccessible.get_accDefaultAction(object childID)
     {
-        string? action = GetAccessibleObject(childID)?.DefaultAction;
+        string? action = DefaultAction(ChildIdToInt(childID));
         Trace($"DefaultAction {action?.ToString() ?? "<null>"}");
         return action;
     }
@@ -152,47 +139,23 @@ internal class BaseAccessible : IAccessible
     /// <summary>
     ///  Gets a description of the object's visual appearance to the user.
     /// </summary>
-    public virtual string? Description => null;
+    public virtual string? Description(int id) => null;
 
     string? IAccessible.get_accDescription(object childID)
     {
-        string? description = GetAccessibleObject(childID)?.Description;
+        string? description = Description(ChildIdToInt(childID));
         Trace($"Description {description?.ToString() ?? "<null>"}");
         return description;
-    }
-
-    /// <devdoc>
-    ///  This function convertes different child ID values to several expected ones,
-    ///  must be the first function to call by the rest of the IAccessible methods. the
-    /// </devdoc>
-    private BaseAccessible? GetAccessibleObject(object childId)
-    {
-        int id = childId is int @int
-            ? @int
-            : Oleacc.CHILDID_SELF;
-
-        if (id == DISP_E_PARAMNOTFOUND)
-        {
-            id = Oleacc.CHILDID_SELF;
-        }
-
-        if (id == Oleacc.CHILDID_SELF)
-        {
-            return this;
-        }
-
-        // TODO: AccessibleObject's default behavior is to treat childId as a 0-based index.
-        return GetChild(id);
     }
 
     /// <summary>
     ///  Gets a description of what the object does or how the object is used.
     /// </summary>
-    public virtual string? Help => null;
+    public virtual string? Help(int id) => null;
 
     string? IAccessible.get_accHelp(object childID)
     {
-        string? help = GetAccessibleObject(childID)?.Help;
+        string? help = Help(ChildIdToInt(childID));
         Trace($"Help {help?.ToString() ?? "<null>"}");
         return help;
     }
@@ -200,7 +163,7 @@ internal class BaseAccessible : IAccessible
     /// <summary>
     ///  Gets an identifier for a Help topic and the path to the Help file associated with this accessible object.
     /// </summary>
-    public virtual int GetHelpTopic(out string? fileName)
+    public virtual int GetHelpTopic(int id, out string? fileName)
     {
         fileName = default;
         return -1;
@@ -208,48 +171,54 @@ internal class BaseAccessible : IAccessible
 
     int IAccessible.get_accHelpTopic(out string? pszHelpFile, object childID)
     {
-        if (GetAccessibleObject(childID) is { } accessible)
-        {
-            int result = GetHelpTopic(out pszHelpFile);
-            return result;
-        }
+        int topicId = GetHelpTopic(ChildIdToInt(childID), out string? fileName);
+        Trace($"GetHelpTopic {topicId}");
 
-        pszHelpFile = null;
-        return -1;
+        pszHelpFile = topicId != -1 ? fileName : null;
+        return topicId;
     }
 
     /// <summary>
     ///  Gets the object shortcut key or access key for an accessible object.
     /// </summary>
-    public virtual string? KeyboardShortcut => null;
+    public virtual string? KeyboardShortcut(int id) => null;
 
     string? IAccessible.get_accKeyboardShortcut(object childID)
     {
-        string? shortcut = GetAccessibleObject(childID)?.KeyboardShortcut;
-        return shortcut;
+        string? keyboardShortcut = KeyboardShortcut(ChildIdToInt(childID));
+        return keyboardShortcut;
     }
 
     /// <summary>
     ///  Gets or sets the object name.
     /// </summary>
-    public virtual string? Name { get; set; }
+    public virtual void SetName(int id, string? name) { }
+    public virtual string? GetName(int id) => null;
 
     string? IAccessible.get_accName(object childID)
     {
-        // Fall back to this.Name if we can't find the child object.
-        string? name = GetAccessibleObject(childID) is { } accessible ? accessible.Name : Name;
+        int id = ChildIdToInt(childID);
+        if (id != Oleacc.CHILDID_SELF && !IsChildElement(id))
+        {
+            return null;
+        }
 
+        string? name = GetName(id);
         Trace($"Get Name {name?.ToString() ?? "<null>"}");
         return name;
     }
 
     void IAccessible.set_accName(object childID, string newName)
     {
-        var accessible = GetAccessibleObject(childID);
-        if (accessible is not null)
+        int id = ChildIdToInt(childID);
+        if (id != Oleacc.CHILDID_SELF && !IsChildElement(id))
         {
-            accessible.Name = newName;
+            return;
         }
+
+        SetName(id, newName);
+        Trace($"Set Name to {newName?.ToString() ?? "<null>"}");
+        return;
     }
 
     /// <summary>
@@ -285,16 +254,11 @@ internal class BaseAccessible : IAccessible
     /// <summary>
     ///  Gets the role of this accessible object.
     /// </summary>
-    public virtual AccessibleRole Role => AccessibleRole.None;
+    public virtual AccessibleRole? Role(int id) => AccessibleRole.None;
 
     object? IAccessible.get_accRole(object childID)
     {
-        object? role = null;
-        var accessible = GetAccessibleObject(childID);
-        if (accessible is not null)
-        {
-            role = (int)accessible.Role;
-        }
+        AccessibleRole? role = Role(ChildIdToInt(childID));
 
         Trace($"Role {role?.ToString() ?? "<null>"}");
         return role;
@@ -303,17 +267,11 @@ internal class BaseAccessible : IAccessible
     /// <summary>
     ///  Gets the state of this accessible object.
     /// </summary>
-    public virtual AccessibleStates State => AccessibleStates.None;
+    public virtual AccessibleStates? State(int id) => AccessibleStates.None;
 
     object? IAccessible.get_accState(object childID)
     {
-        object? state = null;
-        var accessible = GetAccessibleObject(childID);
-        if (accessible is not null)
-        {
-            state = (int)accessible.State;
-        }
-
+        object? state = State(ChildIdToInt(childID));
         Trace($"State {state?.ToString() ?? "<null>"}");
         return state;
     }
@@ -321,26 +279,8 @@ internal class BaseAccessible : IAccessible
     /// <summary>
     ///  Gets the currently selected child.
     /// </summary>
-    public virtual BaseAccessible? GetSelected()
+    public virtual object[]? GetSelected()
     {
-        int count = GetChildCount();
-        if (count >= 0)
-        {
-            for (int index = 0; index < count; ++index)
-            {
-                var child = GetChild(index);
-                if (child is not null && child.State.HasFlag(AccessibleStates.Selected))
-                {
-                    return child;
-                }
-            }
-
-            if (State.HasFlag(AccessibleStates.Selected))
-            {
-                return this;
-            }
-        }
-
         return null;
     }
 
@@ -348,13 +288,7 @@ internal class BaseAccessible : IAccessible
     {
         get
         {
-            object? selection = null;
-            if (GetSelected() is { } accessible)
-            {
-                selection = AsVariant(accessible);
-            }
-
-            Trace($"Selection {selection?.ToString() ?? "<null>"}");
+            object? selection = GetSelected();
             return selection;
         }
     }
@@ -362,77 +296,70 @@ internal class BaseAccessible : IAccessible
     /// <summary>
     ///  Gets or sets the value of an accessible object.
     /// </summary>
-    public virtual string? Value
-    {
-        get => string.Empty;
-        set { }
-    }
+    public virtual string? GetValue(int id) => string.Empty;
+    public virtual void SetValue(int id, string? newValue) { }
 
     string? IAccessible.get_accValue(object childID)
     {
-        string? value = GetAccessibleObject(childID)?.Value;
+        int id = ChildIdToInt(childID);
+        if (id != Oleacc.CHILDID_SELF && !IsChildElement(id))
+        {
+            return null;
+        }
+
+        string? value = GetValue(id);
         Trace($"Get Value {value?.ToString() ?? "<null>"}");
         return value;
     }
 
     void IAccessible.set_accValue(object childID, string newValue)
     {
-        var accessible = GetAccessibleObject(childID);
-        if (accessible is not null)
+        int id = ChildIdToInt(childID);
+        if (id != Oleacc.CHILDID_SELF && !IsChildElement(id))
         {
-            accessible.Value = newValue;
+            return;
         }
+
+        SetValue(id, newValue);
     }
 
     /// <summary>
     ///  Selects this accessible object.
     /// </summary>
-    public virtual void Select(AccessibleSelection flags) { }
+    public virtual void Select(AccessibleSelection flags, int id) { }
 
     void IAccessible.accSelect(int flagsSelect, object childID)
     {
-        if (GetAccessibleObject(childID) is { } accessible)
+        int id = ChildIdToInt(childID);
+        if (id != Oleacc.CHILDID_SELF && !IsChildElement(id))
         {
-            accessible.Select((AccessibleSelection)flagsSelect);
+            return;
         }
+
+        Select((AccessibleSelection)flagsSelect, id);
     }
 
     /// <summary>
     ///  Performs the default action associated with this accessible object.
     /// </summary>
-    public virtual void DoDefaultAction() { }
+    public virtual void DoDefaultAction(int id) { }
 
     void IAccessible.accDoDefaultAction(object childID)
     {
-        if (GetAccessibleObject(childID) is { } accessible)
+        int id = ChildIdToInt(childID);
+        if (id != Oleacc.CHILDID_SELF && !IsChildElement(id))
         {
-            accessible.DoDefaultAction();
+            return;
         }
+
+        DoDefaultAction(id);
     }
 
     /// <summary>
     ///  Gets the object that has the keyboard focus.
     /// </summary>
-    public virtual BaseAccessible? GetFocused()
+    public virtual object? GetFocused()
     {
-        if (GetChildCount() >= 0)
-        {
-            int count = GetChildCount();
-            for (int index = 0; index < count; ++index)
-            {
-                var child = GetChild(index);
-                if (child is not null && child.State.HasFlag(AccessibleStates.Focused))
-                {
-                    return child;
-                }
-            }
-
-            if (State.HasFlag(AccessibleStates.Focused))
-            {
-                return this;
-            }
-        }
-
         return null;
     }
 
@@ -440,15 +367,23 @@ internal class BaseAccessible : IAccessible
     {
         get
         {
-            object? focused = null;
-            if (GetFocused() is { } accessible)
-            {
-                focused = AsVariant(accessible);
-            }
-
+            object? focused = GetFocused();
             Trace($"Focused {focused?.ToString() ?? "<null>"}");
             return focused;
         }
+    }
+
+    public virtual void GetChildLocation(
+        out int left,
+        out int top,
+        out int width,
+        out int height,
+        int id)
+    {
+        left = 0;
+        top = 0;
+        width = 0;
+        height = 0;
     }
 
     void IAccessible.accLocation(
@@ -463,7 +398,8 @@ internal class BaseAccessible : IAccessible
         pcxWidth = 0;
         pcyHeight = 0;
 
-        if (GetAccessibleObject(childID) is { } accessible)
+        int id = ChildIdToInt(childID);
+        if (id == Oleacc.CHILDID_SELF) 
         {
             Rectangle bounds = Bounds;
             pxLeft = bounds.X;
@@ -471,45 +407,39 @@ internal class BaseAccessible : IAccessible
             pcxWidth = bounds.Width;
             pcyHeight = bounds.Height;
             Trace($"Location {bounds}");
+
+            return;
         }
+
+        if (IsChildElement(id))
+        {
+            GetChildLocation(out pxLeft, out pyTop, out pcxWidth, out pcyHeight, id);
+        }
+
+        return;
     }
 
     /// <summary>
     ///  When overridden in a derived class, navigates to another object.
     /// </summary>
-    public virtual BaseAccessible? Navigate(AccessibleNavigation direction)
+    public virtual object? Navigate(AccessibleNavigation direction, int id)
     {
-        int count = GetChildCount();
-
-        if (count >= 0)
-        {
-            switch (direction)
-            {
-                case AccessibleNavigation.FirstChild:
-                    return GetChild(0);
-                case AccessibleNavigation.LastChild:
-                    //TOOO(TanyaSo) - GetChild does not process -1
-                    return GetChild(count - 1);
-            }
-        }
-
         return null;
     }
 
     object? IAccessible.accNavigate(int navDir, object childID)
     {
+        int id = ChildIdToInt(childID);
+        if (id != Oleacc.CHILDID_SELF && !IsChildElement(id))
+        {
+            return null;
+        }
+
         // Note that per the documentation S_FALSE (1) should be returned if an element isn't found. As we're using
         // the public IAccessible definition we can't explicitly do this. Throwing a COMException with the right
         // errorCode might do this, but haven't validated.
-        object? result = null;
-
-        if (GetAccessibleObject(childID) is { } startObject
-            && Navigate((AccessibleNavigation)navDir) is { } accessible)
-        {
-            result = AsVariant(accessible);
-        }
-
-        Trace($"Navigate ({navDir}) {result?.ToString() ?? "<null>"}");
+        object? result = Navigate((AccessibleNavigation)navDir, id);
+        Trace($"Navigate ({Enum.GetName<AccessibleNavigation>((AccessibleNavigation)navDir)} {result?.ToString() ?? "<null>"}");
 
         return result;
     }

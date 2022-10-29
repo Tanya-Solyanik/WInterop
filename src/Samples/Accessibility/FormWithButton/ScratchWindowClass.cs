@@ -17,7 +17,7 @@ internal class ScratchWindowClass : BaseWindowClass
     /// <summary>
     ///  Child class that simulated a button.
     /// </summary>
-    protected WindowHandle ChildWindow { get; set; }
+    protected internal WindowHandle ChildWindow { get; set; }
 
     private const int ButtonId = 123;
 
@@ -37,7 +37,7 @@ internal class ScratchWindowClass : BaseWindowClass
 
         ChildWindow = child.CreateWindow(
             new Rectangle(30, 20, 200, 50),
-            windowName: "Push me!",
+            windowName: "&Push me!",
             style: WindowStyles.Overlapped |
                    WindowStyles.TabStop |
                    WindowStyles.Visible |
