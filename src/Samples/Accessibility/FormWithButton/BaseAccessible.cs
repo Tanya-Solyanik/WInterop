@@ -10,10 +10,10 @@ using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using TerraFX.Interop.Windows;
-using WInterop.Accessibility.Native;
 using WInterop.Errors;
+using Oleacc = WInterop.Accessibility.Native.Oleacc;
 
-namespace WInterop.Accessibility;
+namespace FormWithButton;
 
 /// <summary>
 ///  <see cref="IAccessible"/> base class. Simplified version of <see cref="AccessibleObject"/> that only
@@ -23,9 +23,6 @@ namespace WInterop.Accessibility;
 internal class BaseAccessible : IAccessible
 {
     private const int DISP_E_PARAMNOTFOUND = unchecked((int)0x80020004);
-
-    [AllowNull]
-    private AccessibleObject _accessibleObject;
 
     private static int ChildIdToInt(object childId)
     {
@@ -71,27 +68,33 @@ internal class BaseAccessible : IAccessible
         if (id == Oleacc.CHILDID_SELF)
         {
             child = this;
-            Trace($"Child {child?.ToString() ?? "<null>"}");
+            Trace($"Child self {child?.ToString() ?? "<null>"}");
         }
         else if (IsChildElement(id))
         {
             Trace($"Child {id} is a known element.");
-
-            var e = new COMException("This is a simple element.", errorCode: (int)HResult.S_FALSE)
-            {
-                HResult = (int)HResult.S_FALSE
-            };
-            throw e;
         }
 
-        Trace($"Invalid child id {childID ?? "<null>"}");
+        return null;
+//        else if (IsChildElement(id))
+//        {
+//            Trace($"Child {id} is a known element.");
+
+//            var e = new COMException("This is a simple element.", errorCode: (int)HResult.S_FALSE)
+//            {
+//                HResult = (int)HResult.S_FALSE
+//            };
+//            throw e;
+//        }
+
+//        Trace($"Invalid child id {childID ?? "<null>"}");
         
-        // E_INVALIDARG
-        // https://learn.microsoft.com/dotnet/framework/interop/how-to-map-hresults-and-exceptions
-#pragma warning disable CA2208
-        // Argument name matches that in the native IAccessible definition.
-        throw new ArgumentException($"Invalid child id {childID??"<null>"}.", "varChild");
-#pragma warning restore CA2208
+//        // E_INVALIDARG
+//        // https://learn.microsoft.com/dotnet/framework/interop/how-to-map-hresults-and-exceptions
+//#pragma warning disable CA2208
+//        // Argument name matches that in the native IAccessible definition.
+//        throw new ArgumentException($"Invalid child id {childID??"<null>"}.", "varChild");
+//#pragma warning restore CA2208
     }
 
     /// <summary>
@@ -445,7 +448,7 @@ internal class BaseAccessible : IAccessible
     }
 
     [Conditional("TRACE_ACCESSIBLE")]
-    private void Trace(string message)
+    protected void Trace(string message)
         => Debug.WriteLine($"{ToString()}: {message}");
 
     public override string ToString() => $"{GetType().Name}";

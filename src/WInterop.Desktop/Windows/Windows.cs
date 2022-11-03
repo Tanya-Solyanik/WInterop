@@ -596,6 +596,17 @@ public static partial class Windows
         return rect;
     }
 
+    public static unsafe int MapWindowPointToScreen<T>(this T window, ref Point point) where T : IHandle<WindowHandle>
+    {
+        int ret;
+        fixed (void* p = &point)
+        {
+            ret = TerraFXWindows.MapWindowPoints(window.Handle, WindowHandle.Null, (POINT*)p, 1);
+        }
+
+        return ret;
+    }
+
     public static void SetScrollRange<T>(this T window, ScrollBar scrollBar, int min, int max, bool redraw)
         where T : IHandle<WindowHandle>
     {

@@ -6,9 +6,10 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using WInterop.Accessibility;
-using WInterop.Accessibility.Native;
+//using WInterop.Accessibility.Native;
 using WInterop.Modules;
 using WInterop.Windows;
+using Oleacc = WInterop.Accessibility.Native.Oleacc;
 
 namespace FormWithButton;
 

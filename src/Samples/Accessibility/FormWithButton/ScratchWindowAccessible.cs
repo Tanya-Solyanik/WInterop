@@ -1,14 +1,16 @@
 ﻿// Copyright (c) Jeremy W. Kuhne. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
+#define TRACE_ACCESSIBLE
+
 using System.CodeDom;
 using WInterop.Accessibility;
-using WInterop.Accessibility.Native;
 using WInterop.Windows;
 using System.Runtime.InteropServices;
 using WInterop.Errors;
 using Accessibility;
 using TerraFX.Interop.DirectX;
+using Oleacc = WInterop.Accessibility.Native.Oleacc;
 
 namespace FormWithButton;
 
@@ -37,27 +39,52 @@ internal class ScratchWindowAccessible : BaseAccessible
 
     protected override bool IsChildElement(int id)
     {
-        return id == ButtonId; 
+        return id == ButtonId;
     }
 
     public override object? HitTest(int x, int y)
     {
         if (Bounds.Contains(x, y))
         {
-            Rectangle r = _owner.ChildWindow.GetClientRectangle();
-            return r.Contains(x, y) ? ButtonId : Oleacc.CHILDID_SELF;
+            return ChildBounds.Contains(x, y) ? ButtonId : Oleacc.CHILDID_SELF;
         }
 
+        return null;
         // The vt member of pvarID is VT_EMPTY.
-        var e = new COMException("The point is outside of the object's boundaries.", errorCode: (int)HResult.S_FALSE)
-        {
-            HResult = (int)HResult.S_FALSE
-        };
-        throw e;
+        //var e = new COMException("The point is outside of the object's boundaries.", errorCode: (int)HResult.S_FALSE)
+        //{
+        //    HResult = (int)HResult.S_FALSE
+        //};
+        //throw e;
     }
 
     public override Rectangle Bounds
-        => _owner._window.GetClientRectangle();
+    {
+        get
+        {
+            WindowHandle handle = _owner._window;
+            Rectangle client = handle.GetClientRectangle();
+            Trace($"Client ({client.X}, {client.Y}, {client.Width}, {client.Height}).");
+
+            Rectangle windowRect = handle.GetWindowRectangle();
+            Trace($"Window ({windowRect.X}, {windowRect.Y}, {windowRect.Width}, {windowRect.Height}).");
+
+            return windowRect;
+        }
+    }
+
+    private Rectangle ChildBounds
+    {
+        get
+        {
+            WindowHandle handle = _owner.ChildWindow;
+
+            Rectangle windowRect = handle.GetWindowRectangle();
+            Trace($"Child window ({windowRect.X}, {windowRect.Y}, {windowRect.Width}, {windowRect.Height}).");
+
+            return windowRect;
+        }
+    }
 
     public override string? DefaultAction(int id)
     {
