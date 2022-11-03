@@ -20,7 +20,9 @@ namespace FormWithButton;
 ///  provides the <see cref="IAccessible"/> interface.
 /// </summary>
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
-internal class BaseAccessible : IAccessible
+internal class BaseAccessible :
+    StandardOleMarshalObject, // access all HWNDs from the UI thread - an STA marshaller
+    IAccessible
 {
     private const int DISP_E_PARAMNOTFOUND = unchecked((int)0x80020004);
 
@@ -50,7 +52,7 @@ internal class BaseAccessible : IAccessible
         get
         {
             int count = GetChildCount();
-            Trace($"ChildCount {count}");
+            Trace($"accChildCount {count}");
             return count;
         }
     }
@@ -69,32 +71,28 @@ internal class BaseAccessible : IAccessible
         {
             child = this;
             Trace($"Child self {child?.ToString() ?? "<null>"}");
+            return child;  // causes 'System.InvalidCastException' in Accessibility.dll
         }
-        else if (IsChildElement(id))
+
+        if (IsChildElement(id))
         {
             Trace($"Child {id} is a known element.");
+
+            var e = new COMException("This is a simple element.", errorCode: (int)HResult.S_FALSE)
+            {
+                HResult = (int)HResult.S_FALSE
+            };
+            throw e;
         }
 
-        return null;
-//        else if (IsChildElement(id))
-//        {
-//            Trace($"Child {id} is a known element.");
+        Trace($"Invalid child id {childID ?? "<null>"}");
 
-//            var e = new COMException("This is a simple element.", errorCode: (int)HResult.S_FALSE)
-//            {
-//                HResult = (int)HResult.S_FALSE
-//            };
-//            throw e;
-//        }
-
-//        Trace($"Invalid child id {childID ?? "<null>"}");
-        
-//        // E_INVALIDARG
-//        // https://learn.microsoft.com/dotnet/framework/interop/how-to-map-hresults-and-exceptions
-//#pragma warning disable CA2208
-//        // Argument name matches that in the native IAccessible definition.
-//        throw new ArgumentException($"Invalid child id {childID??"<null>"}.", "varChild");
-//#pragma warning restore CA2208
+        // E_INVALIDARG
+        // https://learn.microsoft.com/dotnet/framework/interop/how-to-map-hresults-and-exceptions
+#pragma warning disable CA2208
+        // Argument name matches that in the native IAccessible definition.
+        throw new ArgumentException($"Invalid child id {childID ?? "<null>"}.", "varChild");
+#pragma warning restore CA2208
     }
 
     /// <summary>
@@ -201,6 +199,8 @@ internal class BaseAccessible : IAccessible
     string? IAccessible.get_accName(object childID)
     {
         int id = ChildIdToInt(childID);
+        Trace($"Get Name for {id}");
+
         if (id != Oleacc.CHILDID_SELF && !IsChildElement(id))
         {
             return null;
@@ -402,7 +402,7 @@ internal class BaseAccessible : IAccessible
         pcyHeight = 0;
 
         int id = ChildIdToInt(childID);
-        if (id == Oleacc.CHILDID_SELF) 
+        if (id == Oleacc.CHILDID_SELF)
         {
             Rectangle bounds = Bounds;
             pxLeft = bounds.X;

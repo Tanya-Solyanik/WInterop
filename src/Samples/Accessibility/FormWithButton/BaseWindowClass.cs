@@ -76,8 +76,8 @@ internal class BaseWindowClass : WindowClass
             accessible = CreateClientAccessible();
         }
 
-        Debug.WriteLine(
-            $"{GetType().Name} WM_GETOBJECT for {Utilities.ObjectIdentifierToString(identifier)}");
+        //Debug.WriteLine(
+        //    $"{GetType().Name} WM_GETOBJECT for {Utilities.ObjectIdentifierToString(identifier)}");
 
         if (accessible is null)
         {

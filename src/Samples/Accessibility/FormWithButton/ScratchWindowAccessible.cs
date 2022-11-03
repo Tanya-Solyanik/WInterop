@@ -44,18 +44,19 @@ internal class ScratchWindowAccessible : BaseAccessible
 
     public override object? HitTest(int x, int y)
     {
+        Trace($"HitTest {x}, {y}");
+
         if (Bounds.Contains(x, y))
         {
             return ChildBounds.Contains(x, y) ? ButtonId : Oleacc.CHILDID_SELF;
         }
 
-        return null;
-        // The vt member of pvarID is VT_EMPTY.
-        //var e = new COMException("The point is outside of the object's boundaries.", errorCode: (int)HResult.S_FALSE)
-        //{
-        //    HResult = (int)HResult.S_FALSE
-        //};
-        //throw e;
+        //The vt member of pvarID is VT_EMPTY.
+        var e = new COMException("The point is outside of the object boundaries.", errorCode: (int)HResult.S_FALSE)
+        {
+            HResult = (int)HResult.S_FALSE
+        };
+        throw e;
     }
 
     public override Rectangle Bounds
@@ -88,6 +89,8 @@ internal class ScratchWindowAccessible : BaseAccessible
 
     public override string? DefaultAction(int id)
     {
+        Trace($"DefaultAction {id}");
+
         return id switch
         {
             Oleacc.CHILDID_SELF => "None",
@@ -98,16 +101,18 @@ internal class ScratchWindowAccessible : BaseAccessible
 
     public override string? Description(int id)
     {
+        Trace($"Description {id}");
         return id switch
         {
-            Oleacc.CHILDID_SELF => "Scratch form.",
-            ButtonId => "Scratch button.",
+            Oleacc.CHILDID_SELF => "Scratch form description.",
+            ButtonId => "Scratch button description.",
             _ => null,
         };
     }
 
     public override string? Help(int id)
     {
+        Trace($"Help {id}");
         return id switch
         {
             Oleacc.CHILDID_SELF => "Scratch form help.",
@@ -126,7 +131,11 @@ internal class ScratchWindowAccessible : BaseAccessible
         };
     }
 
-    private readonly string?[] _names = new string?[2];
+    private readonly string?[] _names = new string?[2]
+    {
+        "Scratch form",
+        "Scratch button"
+    };
 
     public override string? GetName(int id)
     {
@@ -138,11 +147,13 @@ internal class ScratchWindowAccessible : BaseAccessible
         _names[id] = name;
     }
 
-    // TODO: get standard object?
+    // TODO: get standard WINDOW object?
     public override IAccessible? Parent => null;
 
     public override AccessibleRole? Role(int id)
     {
+        Trace($"Role {id}");
+
         return id switch
         {
             Oleacc.CHILDID_SELF => AccessibleRole.Window,
@@ -168,7 +179,11 @@ internal class ScratchWindowAccessible : BaseAccessible
         return new object[] { Oleacc.CHILDID_SELF };
     }
 
-    private readonly string?[] _values = new string?[2];
+    private readonly string?[] _values = new string?[2]
+    {
+        "Scratch form value",
+        "Scratch button value"
+    };
 
     public override string? GetValue(int id)
     {
@@ -213,12 +228,12 @@ internal class ScratchWindowAccessible : BaseAccessible
         width = 0;
         height = 0;
 
-        if (id != ButtonId) 
+        if (id != ButtonId)
         {
             return;
         }
 
-        Rectangle r = _owner.ChildWindow.GetClientRectangle();
+        Rectangle r = _owner.ChildWindow.GetWindowRectangle();
         left = r.Left;
         top = r.Top;
         width = r.Width;
@@ -231,7 +246,8 @@ internal class ScratchWindowAccessible : BaseAccessible
         {
             return null;
         }
-        else if (id == Oleacc.CHILDID_SELF)
+
+        if (id == Oleacc.CHILDID_SELF)
         {
             switch (direction)
             {
@@ -240,7 +256,10 @@ internal class ScratchWindowAccessible : BaseAccessible
                     return ButtonId;
             }
         }
+
         return null;
     }
-    public override string ToString() => $"{base.ToString()} {_owner._window.HWND:x}";
+
+    public override string ToString() 
+        => $"{base.ToString()} {_owner._window.HWND:x}";
 }
