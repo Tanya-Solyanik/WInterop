@@ -24,8 +24,6 @@ internal class BaseAccessible :
     StandardOleMarshalObject, // access all HWNDs from the UI thread - an STA marshaller
     IAccessible
 {
-    private const int DISP_E_PARAMNOTFOUND = unchecked((int)0x80020004);
-
     private static int ChildIdToInt(object childId)
     {
         // TODO: not a VT_I4 should return E_INVALIDARG
@@ -33,7 +31,7 @@ internal class BaseAccessible :
             ? @int
             : Oleacc.CHILDID_SELF;
 
-        if (id == DISP_E_PARAMNOTFOUND)
+        if (id == (int)HResult.DISP_E_PARAMNOTFOUND)
         {
             id = Oleacc.CHILDID_SELF;
         }
@@ -76,6 +74,8 @@ internal class BaseAccessible :
 
         if (IsChildElement(id))
         {
+            return id;
+#if false
             Trace($"Child {id} is a known element.");
 
             var e = new COMException("This is a simple element.", errorCode: (int)HResult.S_FALSE)
@@ -83,16 +83,19 @@ internal class BaseAccessible :
                 HResult = (int)HResult.S_FALSE
             };
             throw e;
+#endif
         }
 
         Trace($"Invalid child id {childID ?? "<null>"}");
-
+        return null;
+#if false
         // E_INVALIDARG
         // https://learn.microsoft.com/dotnet/framework/interop/how-to-map-hresults-and-exceptions
 #pragma warning disable CA2208
         // Argument name matches that in the native IAccessible definition.
         throw new ArgumentException($"Invalid child id {childID ?? "<null>"}.", "varChild");
 #pragma warning restore CA2208
+#endif
     }
 
     /// <summary>
@@ -106,7 +109,9 @@ internal class BaseAccessible :
     // TODO: object - because I want to return element id.
     public virtual object? HitTest(int x, int y)
     {
-        return Bounds.Contains(x, y) ? Oleacc.CHILDID_SELF : null;
+        return Bounds.Contains(x, y)
+            ? Oleacc.CHILDID_SELF
+            : null;
     }
 
     /// <devdoc>
@@ -121,7 +126,7 @@ internal class BaseAccessible :
     {
         object? hit = HitTest(xLeft, yTop);
 
-        Trace($"HitTest {hit?.ToString() ?? "<null>"}");
+        Trace($"accHitTest {hit?.ToString() ?? "<null>"}");
         return hit;
     }
 
@@ -132,8 +137,9 @@ internal class BaseAccessible :
 
     string? IAccessible.get_accDefaultAction(object childID)
     {
-        string? action = DefaultAction(ChildIdToInt(childID));
-        Trace($"DefaultAction {action?.ToString() ?? "<null>"}");
+        int id = ChildIdToInt(childID);
+        string? action = DefaultAction(id);
+        Trace($"DefaultAction(id={id}) {action?.ToString() ?? "<null>"}");
         return action;
     }
 

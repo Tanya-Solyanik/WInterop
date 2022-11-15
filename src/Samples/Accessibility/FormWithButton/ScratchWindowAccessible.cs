@@ -51,12 +51,15 @@ internal class ScratchWindowAccessible : BaseAccessible
             return ChildBounds.Contains(x, y) ? ButtonId : Oleacc.CHILDID_SELF;
         }
 
-        //The vt member of pvarID is VT_EMPTY.
+        return null;
+#if false
+        // The vt member of pvarID is VT_EMPTY.
         var e = new COMException("The point is outside of the object boundaries.", errorCode: (int)HResult.S_FALSE)
         {
             HResult = (int)HResult.S_FALSE
         };
         throw e;
+#endif
     }
 
     public override Rectangle Bounds
@@ -89,8 +92,6 @@ internal class ScratchWindowAccessible : BaseAccessible
 
     public override string? DefaultAction(int id)
     {
-        Trace($"DefaultAction {id}");
-
         return id switch
         {
             Oleacc.CHILDID_SELF => "None",

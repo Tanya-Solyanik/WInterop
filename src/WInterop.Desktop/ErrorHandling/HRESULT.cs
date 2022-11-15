@@ -25,6 +25,7 @@ public enum HResult : int
     E_POINTER                                   = unchecked((int)0x80004003),
     E_FAIL                                      = unchecked((int)0x80004005),
     E_UNEXPECTED                                = unchecked((int)0x8000FFFF),
+    DISP_E_PARAMNOTFOUND                        = unchecked((int)0x80020004),
     STG_E_INVALIDFUNCTION                       = unchecked((int)0x80030001),
     STG_E_FILENOTFOUND                          = unchecked((int)0x80030002),
     STG_E_ACCESSDENIED                          = unchecked((int)0x80030005),

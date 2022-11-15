@@ -1,5 +1,7 @@
 ﻿// Copyright (c) Jeremy W. Kuhne. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
+//#define OLEWin
+//#define EnumVariant
 
 using Accessibility;
 using System.Diagnostics;
@@ -8,7 +10,10 @@ using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms.Automation;
-// using Windows.Win32.UI.Accessibility;
+using TerraFX.Interop.Windows;
+using WInterop.Accessibility;
+using WInterop.Errors;
+using Oleacc = WInterop.Accessibility.Native.Oleacc;
 
 namespace System.Windows.Forms;
 
@@ -16,50 +21,36 @@ namespace System.Windows.Forms;
 ///  Provides an implementation for an object that can be inspected by an
 ///  accessibility application.
 /// </summary>
-public partial class AccessibleObject :
+[DebuggerDisplay("{DebuggerDisplay,nq}")]
+public partial class WrapperAccessible :
     StandardOleMarshalObject,
     IReflect,
-    IAccessible,
-    Oleaut32.IEnumVariant,
-    IOleWindow.Interface,
-
+    IAccessible
+  //  Oleaut32.IEnumVariant
+   //  IOleWindow.Interface - define my own interface
 {
     /// <summary>
-    ///  Specifies the <see cref="IAccessible"/> interface used by this <see cref="AccessibleObject"/>.
+    ///  Specifies the <see cref="IAccessible"/> interface used by this <see cref="WrapperAccessible"/>.
     /// </summary>
-    /// <remarks>
-    ///  <para>
-    ///   This is also set by <see cref="UseStdAccessibleObjects(IntPtr, int)"/>.
-    ///  </para>
-    /// </remarks>
-    private SystemIAccessibleWrapper _systemIAccessible = new(
-        null /* Prevents throwing exception when call to null-value system IAccessible */);
+    private readonly IAccessible? _systemIAccessible;
 
     /// <summary>
     ///  Specifies the <see cref="Oleaut32.IEnumVariant"/> used by this
-    /// <see cref="AccessibleObject"/> .
+    ///  <see cref="WrapperAccessible"/> .
     /// </summary>
     private Oleaut32.IEnumVariant? _systemIEnumVariant;
-    private Oleaut32.IEnumVariant? _enumVariant;
+        private uint _currentChild;
 
     // IOleWindow interface of the 'inner' system IAccessible object that we are wrapping
-    private IOleWindow.Interface? _systemIOleWindow;
+   // private IOleWindow.Interface? _systemIOleWindow;
 
     // Indicates this object is being used ONLY to wrap a system IAccessible
     private readonly bool _systemWrapper;
 
-    // The support for the UIA Notification event begins in RS3.
-    // Assume the UIA Notification event is available until we learn otherwise.
-    // If we learn that the UIA Notification event is not available,
-    // controls should not attempt to raise it.
-    private static bool s_notificationEventAvailable = true;
-    private static bool? s_canNotifyClients;
-
-    internal const int InvalidIndex = -1;
-
-    internal const int RuntimeIDFirstItem = 0x2a;
-
-    public AccessibleObject()
+    /// <summary>
+    /// Winforms wrapper.
+    /// </summary>
+    public WrapperAccessible()
     {
     }
 
@@ -67,13 +58,11 @@ public partial class AccessibleObject :
     ///  This constructor is used ONLY for wrapping system IAccessible objects
     ///  that are returned by the IAccessible methods.
     /// </devdoc>
-    private AccessibleObject(IAccessible? accessible)
+    private WrapperAccessible(IAccessible? accessible)
     {
-        _systemIAccessible = new SystemIAccessibleWrapper(accessible);
+        _systemIAccessible = accessible;
         _systemWrapper = true;
     }
-
-    private protected virtual string? AutomationId => null;
 
     /// <summary>
     ///  Gets the bounds of the accessible object, in screen coordinates.
@@ -82,59 +71,44 @@ public partial class AccessibleObject :
     {
         get
         {
+            int left = 0;
+            int top = 0;
+            int width = 0;
+            int height = 0;
+
             // Use the system provided bounds
-            _systemIAccessible.accLocation(out int left, out int top, out int width, out int height, NativeMethods.CHILDID_SELF);
+            _systemIAccessible?.accLocation(out left, out top, out width, out height, Oleacc.CHILDID_SELF);
             return new Rectangle(left, top, width, height);
         }
-    }
-
-    internal static bool CanNotifyClients => s_canNotifyClients ??= InitializeCanNotifyClients();
-
-    private static bool InitializeCanNotifyClients()
-    {
-        // While handling accessibility events, accessibility clients (JAWS, Inspect),
-        // can access AccessibleObject associated with the event. In the designer scenario, controls are not
-        // receiving messages directly and might not respond to messages while in the notification call.
-        // This will make the server process unresponsive and will cause VisualStudio to become unresponsive.
-        //
-        // The following compat switch is set in the designer server process to prevent controls from sending notification.
-        if (AppContext.TryGetSwitch("Switch.System.Windows.Forms.AccessibleObject.NoClientNotifications", out bool isEnabled))
-        {
-            return !isEnabled;
-        }
-
-        return true;
     }
 
     /// <summary>
     ///  Gets a description of the default action for an object.
     /// </summary>
-    public virtual string? DefaultAction => _systemIAccessible.get_accDefaultAction(NativeMethods.CHILDID_SELF);
+    public virtual string? DefaultAction => _systemIAccessible?.get_accDefaultAction(Oleacc.CHILDID_SELF);
 
     /// <summary>
     ///  Gets a description of the object's visual appearance to the user.
     /// </summary>
-    public virtual string? Description => _systemIAccessible.get_accDescription(NativeMethods.CHILDID_SELF);
-
-    private Oleaut32.IEnumVariant EnumVariant => _enumVariant ??= new EnumVariantObject(this);
+    public virtual string? Description => _systemIAccessible?.get_accDescription(Oleacc.CHILDID_SELF);
 
     /// <summary>
     ///  Gets a description of what the object does or how the object is used.
     /// </summary>
-    public virtual string? Help => _systemIAccessible.get_accHelp(NativeMethods.CHILDID_SELF);
+    public virtual string? Help => _systemIAccessible?.get_accHelp(Oleacc.CHILDID_SELF);
 
     /// <summary>
     ///  Gets the object shortcut key or access key for an accessible object.
     /// </summary>
-    public virtual string? KeyboardShortcut => _systemIAccessible.get_accKeyboardShortcut(NativeMethods.CHILDID_SELF);
+    public virtual string? KeyboardShortcut => _systemIAccessible?.get_accKeyboardShortcut(Oleacc.CHILDID_SELF);
 
     /// <summary>
     ///  Gets or sets the object name.
     /// </summary>
     public virtual string? Name
     {
-        get => _systemIAccessible.get_accName(NativeMethods.CHILDID_SELF);
-        set => _systemIAccessible.set_accName(NativeMethods.CHILDID_SELF, value);
+        get => _systemIAccessible?.get_accName(Oleacc.CHILDID_SELF);
+        set => _systemIAccessible?.set_accName(Oleacc.CHILDID_SELF, value);
     }
 
     /// <summary>
@@ -156,7 +130,7 @@ public partial class AccessibleObject :
     ///  window's client area is the parent of the non-client area of the current window (at least from an
     ///  accessiblity object standpoint).
     /// </devdoc>
-    public virtual AccessibleObject? Parent => WrapIAccessible(_systemIAccessible.accParent);
+    public virtual WrapperAccessible? Parent => WrapIAccessible(_systemIAccessible?.accParent);
 
     /// <summary>
     ///  Gets the role of this accessible object.
@@ -165,7 +139,7 @@ public partial class AccessibleObject :
     {
         get
         {
-            var accRole = _systemIAccessible.get_accRole(NativeMethods.CHILDID_SELF);
+            var accRole = _systemIAccessible.get_accRole(Oleacc.CHILDID_SELF);
             return accRole is not null
                 ? (AccessibleRole)accRole
                 : AccessibleRole.None;
@@ -179,7 +153,7 @@ public partial class AccessibleObject :
     {
         get
         {
-            var accState = _systemIAccessible.get_accState(NativeMethods.CHILDID_SELF);
+            var accState = _systemIAccessible?.get_accState(Oleacc.CHILDID_SELF);
             return accState is not null
                 ? (AccessibleStates)accState
                 : AccessibleStates.None;
@@ -193,23 +167,23 @@ public partial class AccessibleObject :
     {
         get
         {
-            if (_systemIAccessible.IsIAccessibleCreated)
+            if (_systemIAccessible is not null)
             {
-                return _systemIAccessible.get_accValue(NativeMethods.CHILDID_SELF);
+                return _systemIAccessible.get_accValue(Oleacc.CHILDID_SELF);
             }
 
             return string.Empty;
         }
-        set => _systemIAccessible.set_accValue(NativeMethods.CHILDID_SELF, value);
+        set => _systemIAccessible?.set_accValue(Oleacc.CHILDID_SELF, value);
     }
 
     /// <summary>
     ///  When overridden in a derived class, gets the accessible child
     ///  corresponding to the specified index.
     /// </summary>
-    public virtual AccessibleObject? GetChild(int index) => null;
+    public virtual WrapperAccessible? GetChild(int index) => null;
 
-    internal virtual int GetChildIndex(AccessibleObject? child) => InvalidIndex;
+    internal virtual int GetChildIndex(WrapperAccessible? child) => -1;
 
     /// <summary>
     ///  When overridden in a derived class, gets the number of children
@@ -244,7 +218,7 @@ public partial class AccessibleObject :
     ///  system behavior. Otherwise return destination object in the out
     ///  parameter, or null to indicate 'off end of list'.
     /// </summary>
-    internal virtual bool GetSysChild(AccessibleNavigation navdir, out AccessibleObject? accessibleObject)
+    internal virtual bool GetSysChild(AccessibleNavigation navdir, out WrapperAccessible? accessibleObject)
     {
         accessibleObject = null;
         return false;
@@ -254,7 +228,7 @@ public partial class AccessibleObject :
     ///  When overridden in a derived class, gets the object that has the
     ///  keyboard focus.
     /// </summary>
-    public virtual AccessibleObject? GetFocused()
+    public virtual WrapperAccessible? GetFocused()
     {
         // Default behavior for objects with AccessibleObject children
         if (GetChildCount() >= 0)
@@ -262,7 +236,7 @@ public partial class AccessibleObject :
             int count = GetChildCount();
             for (int index = 0; index < count; ++index)
             {
-                AccessibleObject? child = GetChild(index);
+                WrapperAccessible? child = GetChild(index);
                 Debug.Assert(child is not null, $"GetChild({index}) returned null!");
                 if (child is not null && ((child.State & AccessibleStates.Focused) != 0))
                 {
@@ -286,12 +260,12 @@ public partial class AccessibleObject :
     ///  associated with this accessible object.
     /// </summary>
     public virtual int GetHelpTopic(out string? fileName) =>
-        _systemIAccessible.get_accHelpTopic(out fileName, NativeMethods.CHILDID_SELF);
+        _systemIAccessible.get_accHelpTopic(out fileName, Oleacc.CHILDID_SELF);
 
     /// <summary>
     ///  When overridden in a derived class, gets the currently selected child.
     /// </summary>
-    public virtual AccessibleObject? GetSelected()
+    public virtual WrapperAccessible? GetSelected()
     {
         // Default behavior for objects with AccessibleObject children
         if (GetChildCount() >= 0)
@@ -299,7 +273,7 @@ public partial class AccessibleObject :
             int count = GetChildCount();
             for (int index = 0; index < count; ++index)
             {
-                AccessibleObject? child = GetChild(index);
+                WrapperAccessible? child = GetChild(index);
                 Debug.Assert(child is not null, $"GetChild({index}) returned null!");
                 if (child is not null && ((child.State & AccessibleStates.Selected) != 0))
                 {
@@ -321,7 +295,7 @@ public partial class AccessibleObject :
     /// <summary>
     ///  Return the child object at the given screen coordinates.
     /// </summary>
-    public virtual AccessibleObject? HitTest(int x, int y)
+    public virtual WrapperAccessible? HitTest(int x, int y)
     {
         // Default behavior for objects with AccessibleObject children
         if (GetChildCount() >= 0)
@@ -329,7 +303,7 @@ public partial class AccessibleObject :
             int count = GetChildCount();
             for (int index = 0; index < count; ++index)
             {
-                AccessibleObject? child = GetChild(index);
+                WrapperAccessible? child = GetChild(index);
                 Debug.Assert(child is not null, $"GetChild({index}) returned null!");
                 if (child is not null && child.Bounds.Contains(x, y))
                 {
@@ -340,7 +314,7 @@ public partial class AccessibleObject :
             return this;
         }
 
-        if (_systemIAccessible.IsIAccessibleCreated)
+        if (_systemIAccessible is not null)
         {
             return WrapIAccessible(_systemIAccessible.accHitTest(x, y));
         }
@@ -362,19 +336,18 @@ public partial class AccessibleObject :
         {
             ValidateChildID(ref childID);
 
-            Debug.WriteLineIf(
-                CompModSwitches.MSAA.TraceInfo,
+            Debug.WriteLine(
                 $"AccessibleObject.AccDoDefaultAction: this = {ToString()}, childID = {childID}");
 
             // If the default action is to be performed on self, do it.
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 DoDefaultAction();
                 return;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 child.DoDefaultAction();
@@ -408,9 +381,9 @@ public partial class AccessibleObject :
 
         if (IsClientObject)
         {
-            Debug.WriteLineIf(CompModSwitches.MSAA.TraceInfo, $"AccessibleObject.AccHitTest: this = {ToString()}");
+            Debug.WriteLine($"AccessibleObject.AccHitTest: this = {ToString()}");
 
-            AccessibleObject? obj = HitTest(xLeft, yTop);
+            WrapperAccessible? obj = HitTest(xLeft, yTop);
             if (obj is not null)
             {
                 return AsVariant(obj);
@@ -430,16 +403,20 @@ public partial class AccessibleObject :
         out int pcyHeight,
         object childID)
     {
+        pxLeft = 0;
+        pyTop = 0;
+        pcxWidth = 0;
+        pcyHeight = 0;
+
         if (IsClientObject)
         {
             ValidateChildID(ref childID);
 
-            Debug.WriteLineIf(
-                CompModSwitches.MSAA.TraceInfo,
+            Debug.WriteLine(
                 $"AccessibleObject.AccLocation: this = {ToString()}, childID = {childID}");
 
             // Use the Location function's return value if available
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 Rectangle bounds = Bounds;
                 pxLeft = bounds.X;
@@ -447,13 +424,13 @@ public partial class AccessibleObject :
                 pcxWidth = bounds.Width;
                 pcyHeight = bounds.Height;
 
-                Debug.WriteLineIf(CompModSwitches.MSAA.TraceInfo, $"AccessibleObject.AccLocation: Returning {bounds}");
+                Debug.WriteLine($"AccessibleObject.AccLocation: Returning {bounds}");
 
                 return;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 Rectangle bounds = child.Bounds;
@@ -462,13 +439,13 @@ public partial class AccessibleObject :
                 pcxWidth = bounds.Width;
                 pcyHeight = bounds.Height;
 
-                Debug.WriteLineIf(CompModSwitches.MSAA.TraceInfo, $"AccessibleObject.AccLocation: Returning {bounds}");
+                Debug.WriteLine($"AccessibleObject.AccLocation: Returning {bounds}");
 
                 return;
             }
         }
 
-        _systemIAccessible.accLocation(out pxLeft, out pyTop, out pcxWidth, out pcyHeight, childID);
+        _systemIAccessible?.accLocation(out pxLeft, out pyTop, out pcxWidth, out pcyHeight, childID);
     }
 
     /// <summary>
@@ -480,14 +457,13 @@ public partial class AccessibleObject :
         {
             ValidateChildID(ref childID);
 
-            Debug.WriteLineIf(
-                CompModSwitches.MSAA.TraceInfo,
+            Debug.WriteLine(
                 $"AccessibleObject.AccNavigate: this = {ToString()}, navdir = {navDir}, childID = {childID}");
 
             // Use the Navigate function's return value if available
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
-                AccessibleObject? newObject = Navigate((AccessibleNavigation)navDir);
+                WrapperAccessible? newObject = Navigate((AccessibleNavigation)navDir);
                 if (newObject is not null)
                 {
                     return AsVariant(newObject);
@@ -495,7 +471,7 @@ public partial class AccessibleObject :
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 return AsVariant(child.Navigate((AccessibleNavigation)navDir));
@@ -504,7 +480,7 @@ public partial class AccessibleObject :
 
         if (!SysNavigate(navDir, childID, out object? retObject))
         {
-            return _systemIAccessible.accNavigate(navDir, childID);
+            return _systemIAccessible?.accNavigate(navDir, childID);
         }
 
         return retObject;
@@ -519,19 +495,19 @@ public partial class AccessibleObject :
         {
             ValidateChildID(ref childID);
 
-            Debug.WriteLineIf(
-                CompModSwitches.MSAA.TraceInfo,
+            Debug.WriteLine(
                 $"AccessibleObject.AccSelect: this = {ToString()}, flagsSelect = {flagsSelect}, childID = {childID}");
 
             // If the selection is self, do it.
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
-                Select((AccessibleSelection)flagsSelect);    // Uses an Enum which matches SELFLAG
+                // Uses an Enum which matches SELFLAG
+                Select((AccessibleSelection)flagsSelect);
                 return;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 child.Select((AccessibleSelection)flagsSelect);
@@ -539,7 +515,7 @@ public partial class AccessibleObject :
             }
         }
 
-        _systemIAccessible.accSelect(flagsSelect, childID);
+        _systemIAccessible?.accSelect(flagsSelect, childID);
     }
 
     /// <summary>
@@ -548,7 +524,7 @@ public partial class AccessibleObject :
     public virtual void DoDefaultAction()
     {
         // By default, does the system default action if available.
-        _systemIAccessible.accDoDefaultAction(0);
+        _systemIAccessible?.accDoDefaultAction(0);
     }
 
     /// <summary>
@@ -560,18 +536,17 @@ public partial class AccessibleObject :
         {
             ValidateChildID(ref childID);
 
-            Debug.WriteLineIf(
-                CompModSwitches.MSAA.TraceInfo,
+            Debug.WriteLine(
                 $"AccessibleObject.GetAccChild: this = {ToString()}, childID = {childID}");
 
             // Return self for CHILDID_SELF.
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 return AsIAccessible(this);
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 // Make sure we're not returning ourselves as our own child
@@ -611,13 +586,12 @@ public partial class AccessibleObject :
                 childCount = GetChildCount();
             }
 
-            if (childCount == -1)
+            if (childCount == -1 && _systemIAccessible is not null)
             {
                 childCount = _systemIAccessible.accChildCount;
             }
 
-            Debug.WriteLineIf(
-                CompModSwitches.MSAA.TraceInfo,
+            Debug.WriteLine(
                 $"AccessibleObject.accChildCount: this = {ToString()}, returning {childCount}");
 
             return childCount;
@@ -634,13 +608,13 @@ public partial class AccessibleObject :
             ValidateChildID(ref childID);
 
             // Return the default action property if available
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 return DefaultAction;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 return child.DefaultAction;
@@ -660,13 +634,13 @@ public partial class AccessibleObject :
             ValidateChildID(ref childID);
 
             // Return the description property if available
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 return Description;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 return child.Description;
@@ -679,9 +653,9 @@ public partial class AccessibleObject :
     /// <summary>
     ///  Returns the appropriate child from the Accessible Child Collection, if available.
     /// </summary>
-    private AccessibleObject? GetAccessibleChild(object childID)
+    private WrapperAccessible? GetAccessibleChild(object childID)
     {
-        if (!childID.Equals(NativeMethods.CHILDID_SELF))
+        if (!childID.Equals(Oleacc.CHILDID_SELF))
         {
             // The first child is childID == 1 (index == 0)
             int index = (int)childID - 1;
@@ -703,16 +677,16 @@ public partial class AccessibleObject :
         {
             if (IsClientObject)
             {
-                Debug.WriteLineIf(CompModSwitches.MSAA.TraceInfo, $"AccessibleObject.GetAccFocus: this = {ToString()}");
+                Debug.WriteLine($"AccessibleObject.GetAccFocus: this = {ToString()}");
 
-                AccessibleObject? obj = GetFocused();
+                WrapperAccessible? obj = GetFocused();
                 if (obj is not null)
                 {
                     return AsVariant(obj);
                 }
             }
 
-            return _systemIAccessible.accFocus;
+            return _systemIAccessible?.accFocus;
         }
     }
 
@@ -725,13 +699,13 @@ public partial class AccessibleObject :
         {
             ValidateChildID(ref childID);
 
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 return Help;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 return child.Help;
@@ -750,13 +724,13 @@ public partial class AccessibleObject :
         {
             ValidateChildID(ref childID);
 
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 return GetHelpTopic(out pszHelpFile);
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 return child.GetHelpTopic(out pszHelpFile);
@@ -780,13 +754,13 @@ public partial class AccessibleObject :
         {
             ValidateChildID(ref childID);
 
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 return KeyboardShortcut;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 return child.KeyboardShortcut;
@@ -810,25 +784,23 @@ public partial class AccessibleObject :
         {
             ValidateChildID(ref childID);
 
-            Debug.WriteLineIf(
-                CompModSwitches.MSAA.TraceInfo,
-                $"AccessibleObject.get_accName: this = {ToString()}, childID = {childID}");
+            Debug.WriteLine($"AccessibleObject.get_accName: this = {ToString()}, childID = {childID}");
 
             // Return the name property if available
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 return Name;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 return child.Name;
             }
         }
 
-        string? retval = _systemIAccessible.get_accName(childID);
+        string? retval = _systemIAccessible?.get_accName(childID);
 
         if (IsClientObject)
         {
@@ -849,8 +821,9 @@ public partial class AccessibleObject :
     {
         get
         {
-            Debug.WriteLineIf(CompModSwitches.MSAA.TraceInfo, $"AccessibleObject.accParent: this = {ToString()}");
-            AccessibleObject? parent = Parent;
+            Debug.WriteLine($"AccessibleObject.accParent: this = {ToString()}");
+
+            WrapperAccessible? parent = Parent;
             if (parent is not null)
             {
                 // Some debugging related tests
@@ -879,13 +852,13 @@ public partial class AccessibleObject :
             ValidateChildID(ref childID);
 
             // Return the role property if available
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 return (int)Role;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 return (int)child.Role;
@@ -909,16 +882,16 @@ public partial class AccessibleObject :
         {
             if (IsClientObject)
             {
-                Debug.WriteLineIf(CompModSwitches.MSAA.TraceInfo, $"AccessibleObject.GetAccSelection: this = {ToString()}");
+                Debug.WriteLine($"AccessibleObject.GetAccSelection: this = {ToString()}");
 
-                AccessibleObject? obj = GetSelected();
+                WrapperAccessible? obj = GetSelected();
                 if (obj is not null)
                 {
                     return AsVariant(obj);
                 }
             }
 
-            return _systemIAccessible.accSelection;
+            return _systemIAccessible?.accSelection;
         }
     }
 
@@ -931,18 +904,16 @@ public partial class AccessibleObject :
         {
             ValidateChildID(ref childID);
 
-            Debug.WriteLineIf(
-                CompModSwitches.MSAA.TraceInfo,
-                $"AccessibleObject.GetAccState: this = {ToString()}, childID = {childID}");
+            Debug.WriteLine($"AccessibleObject.GetAccState: this = {ToString()}, childID = {childID}");
 
             // Return the state property if available
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 return (int)State;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 return (int)child.State;
@@ -962,13 +933,13 @@ public partial class AccessibleObject :
             ValidateChildID(ref childID);
 
             // Return the value property if available
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 return Value;
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 return child.Value;
@@ -988,7 +959,7 @@ public partial class AccessibleObject :
             ValidateChildID(ref childID);
 
             // Set the name property if available
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 // Attempt to set the name property
                 Name = newName;
@@ -996,7 +967,7 @@ public partial class AccessibleObject :
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 child.Name = newName;
@@ -1017,7 +988,7 @@ public partial class AccessibleObject :
             ValidateChildID(ref childID);
 
             // Set the value property if available
-            if (childID.Equals(NativeMethods.CHILDID_SELF))
+            if (childID.Equals(Oleacc.CHILDID_SELF))
             {
                 // Attempt to set the value property
                 Value = newValue;
@@ -1025,7 +996,7 @@ public partial class AccessibleObject :
             }
 
             // If we have an accessible object collection, get the appropriate child
-            AccessibleObject? child = GetAccessibleChild(childID);
+            WrapperAccessible? child = GetAccessibleChild(childID);
             if (child is not null)
             {
                 child.Value = newValue;
@@ -1051,6 +1022,7 @@ public partial class AccessibleObject :
     ///  accessible object, which will be able to return an hwnd back to the OS. So we are
     ///  effectively 'preempting' what WindowFromAccessibleObject() would do.
     /// </summary>
+#if OLEWin
     unsafe HRESULT IOleWindow.Interface.GetWindow(HWND* phwnd)
     {
         if (phwnd is null)
@@ -1065,7 +1037,7 @@ public partial class AccessibleObject :
         }
 
         // Otherwise delegate to the parent object
-        AccessibleObject? parent = Parent;
+        WrapperAccessible? parent = Parent;
         if (parent is IOleWindow.Interface parentWindow)
         {
             return parentWindow.GetWindow(phwnd);
@@ -1073,7 +1045,7 @@ public partial class AccessibleObject :
 
         // Or fail if there is no parent
         *phwnd = HWND.Null;
-        return HRESULT.E_FAIL;
+        return HResult.E_FAIL;
     }
 
     /// <summary>
@@ -1088,7 +1060,7 @@ public partial class AccessibleObject :
         }
 
         // Otherwise delegate to the parent object
-        AccessibleObject? parent = Parent;
+        WrapperAccessible? parent = Parent;
         if (parent is IOleWindow.Interface parentWindow)
         {
             return parentWindow.ContextSensitiveHelp(fEnterMode);
@@ -1097,16 +1069,27 @@ public partial class AccessibleObject :
         // Or do nothing if there is no parent
         return HRESULT.S_OK;
     }
+#endif
 
+#if EnumVariant
     /// <summary>
     ///  Clone this accessible object.
     /// </summary>
-    HRESULT Oleaut32.IEnumVariant.Clone(Oleaut32.IEnumVariant[]? ppEnum) => EnumVariant.Clone(ppEnum);
+    HResult Oleaut32.IEnumVariant.Clone(Oleaut32.IEnumVariant[]? ppEnum)
+    {
+        if (ppEnum is null)
+        {
+            return HResult.E_POINTER;
+        }
+
+        ppEnum[0] = new EnumVariantObject(_owner, _currentChild);
+        return HRESULT.S_OK;
+    }
 
     /// <summary>
     ///  Obtain the next n children of this accessible object.
     /// </summary>
-    unsafe HRESULT Oleaut32.IEnumVariant.Next(uint celt, IntPtr rgVar, uint* pCeltFetched)
+    unsafe HResult Oleaut32.IEnumVariant.Next(uint celt, IntPtr rgVar, uint* pCeltFetched)
     {
         return EnumVariant.Next(celt, rgVar, pCeltFetched);
     }
@@ -1114,17 +1097,17 @@ public partial class AccessibleObject :
     /// <summary>
     ///  Resets the child accessible object enumerator.
     /// </summary>
-    HRESULT Oleaut32.IEnumVariant.Reset() => EnumVariant.Reset();
+    HResult Oleaut32.IEnumVariant.Reset() => EnumVariant.Reset();
 
     /// <summary>
     ///  Skip the next n child accessible objects
     /// </summary>
-    HRESULT Oleaut32.IEnumVariant.Skip(uint celt) => EnumVariant.Skip(celt);
-
+    HResult Oleaut32.IEnumVariant.Skip(uint celt) => EnumVariant.Skip(celt);
+#endif
     /// <summary>
     ///  When overridden in a derived class, navigates to another object.
     /// </summary>
-    public virtual AccessibleObject? Navigate(AccessibleNavigation navdir)
+    public virtual WrapperAccessible? Navigate(AccessibleNavigation navdir)
     {
         // Some default behavior for objects with AccessibleObject children
         if (GetChildCount() >= 0)
@@ -1156,11 +1139,11 @@ public partial class AccessibleObject :
             }
         }
 
-        if (_systemIAccessible.IsIAccessibleCreated)
+        if (_systemIAccessible is not null)
         {
-            if (!SysNavigate((int)navdir, NativeMethods.CHILDID_SELF, out object? retObject))
+            if (!SysNavigate((int)navdir, Oleacc.CHILDID_SELF, out object? retObject))
             {
-                retObject = _systemIAccessible.accNavigate((int)navdir, NativeMethods.CHILDID_SELF);
+                retObject = _systemIAccessible.accNavigate((int)navdir, Oleacc.CHILDID_SELF);
             }
 
             return WrapIAccessible(retObject);
@@ -1174,24 +1157,24 @@ public partial class AccessibleObject :
     /// </summary>
     public virtual void Select(AccessibleSelection flags)
     {
-        _systemIAccessible.accSelect((int)flags, 0);
+        _systemIAccessible?.accSelect((int)flags, 0);
     }
 
-    private object? AsVariant(AccessibleObject? obj)
+    private object? AsVariant(WrapperAccessible? obj)
     {
         if (obj == this)
         {
-            return NativeMethods.CHILDID_SELF;
+            return Oleacc.CHILDID_SELF;
         }
 
         return AsIAccessible(obj);
     }
 
-    private static IAccessible? AsIAccessible(AccessibleObject? obj)
+    private static IAccessible? AsIAccessible(WrapperAccessible? obj)
     {
         if (obj is not null && obj._systemWrapper)
         {
-            return obj._systemIAccessible.SystemIAccessibleInternal;
+            return obj._systemIAccessible;
         }
 
         return obj;
@@ -1212,27 +1195,37 @@ public partial class AccessibleObject :
     ///  for a *user-defined* accessible object, that has NO inner object, its important that the id is
     ///  left as OBJID_CLIENT, otherwise the object will be short-circuited into a total NOP!
     /// </summary>
-    internal int AccessibleObjectId { get; set; } = User32.OBJID.CLIENT;
+    internal int AccessibleObjectId { get; set; } = (int)ObjectIdentifier.Client;
 
     /// <summary>
     ///  Indicates whether this accessible object represents the client area of
     ///  the window.
     /// </summary>
-    internal bool IsClientObject => AccessibleObjectId == User32.OBJID.CLIENT;
+    internal bool IsClientObject => AccessibleObjectId == (int)ObjectIdentifier.Client;
 
     /// <summary>
     ///  Indicates whether this accessible object represents the non-client
     ///  area of the window.
     /// </summary>
-    internal bool IsNonClientObject => AccessibleObjectId == User32.OBJID.WINDOW;
+    internal bool IsNonClientObject => AccessibleObjectId == (int)ObjectIdentifier.Window;
 
-    internal IAccessible? GetSystemIAccessibleInternal() => _systemIAccessible.SystemIAccessibleInternal;
+    internal IAccessible? GetSystemIAccessibleInternal() => _systemIAccessible;
 
+#if false
+    /// <summary>
+    ///  UseStdAccessibleObjects
+    /// </summary>
+    /// <param name="handle"></param>
     protected void UseStdAccessibleObjects(IntPtr handle)
     {
         UseStdAccessibleObjects(handle, AccessibleObjectId);
     }
 
+    /// <summary>
+    ///  UseStdAccessibleObjects
+    /// </summary>
+    /// <param name="handle"></param>
+    /// <param name="objid"></param>
     protected void UseStdAccessibleObjects(IntPtr handle, int objid)
     {
         object? acc = null;
@@ -1261,6 +1254,7 @@ public partial class AccessibleObject :
             _systemIOleWindow = (IOleWindow.Interface?)acc;
         }
     }
+#endif
 
     /// <summary>
     ///  Performs custom navigation between parent/child/sibling accessible
@@ -1275,13 +1269,13 @@ public partial class AccessibleObject :
         retObject = null;
 
         // Only override system navigation relative to ourselves (since we can't interpret OLEACC child ids)
-        if (!childID.Equals(NativeMethods.CHILDID_SELF))
+        if (!childID.Equals(Oleacc.CHILDID_SELF))
         {
             return false;
         }
 
         // Perform any supported navigation operation (fall back on system for unsupported navigation ops)
-        if (!GetSysChild((AccessibleNavigation)navDir, out AccessibleObject? newObject))
+        if (!GetSysChild((AccessibleNavigation)navDir, out WrapperAccessible? newObject))
         {
             return false;
         }
@@ -1303,9 +1297,9 @@ public partial class AccessibleObject :
         // need to convert them here.
         if (childID is null)
         {
-            childID = NativeMethods.CHILDID_SELF;
+            childID = Oleacc.CHILDID_SELF;
         }
-        else if (childID.Equals((int)HRESULT.DISP_E_PARAMNOTFOUND))
+        else if (childID.Equals((int)HResult.DISP_E_PARAMNOTFOUND))
         {
             childID = 0;
         }
@@ -1316,7 +1310,8 @@ public partial class AccessibleObject :
         }
     }
 
-    private AccessibleObject? WrapIAccessible(object? iAccessible)
+    // wrap before returning objects from IAccessible methods
+    private WrapperAccessible? WrapIAccessible(object? iAccessible)
     {
         if (iAccessible is not IAccessible accessible)
         {
@@ -1324,12 +1319,12 @@ public partial class AccessibleObject :
         }
 
         // Check to see if this object already wraps iAccessible.
-        if (_systemIAccessible.SystemIAccessibleInternal == iAccessible)
+        if (_systemIAccessible == iAccessible)
         {
             return this;
         }
 
-        return new AccessibleObject(accessible);
+        return new WrapperAccessible(accessible);
     }
 
     /// <summary>
@@ -1476,7 +1471,7 @@ public partial class AccessibleObject :
                     args = new object[getMethod.GetParameters().Length];
                     for (int i = 0; i < args.Length; i++)
                     {
-                        args[i] = NativeMethods.CHILDID_SELF;
+                        args[i] = Oleacc.CHILDID_SELF;
                     }
                 }
             }

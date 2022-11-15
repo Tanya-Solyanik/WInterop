@@ -1,47 +1,26 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace WInterop.Accessibility.Native;
-
-public class Oleaut32
-{
-    // Licensed to the .NET Foundation under one or more agreements.
-// The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
+﻿// Copyright (c) Jeremy W. Kuhne. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 using System.Runtime.InteropServices;
+using WInterop.Errors;
 
-internal partial class Interop
+public static class Oleaut32
 {
-    internal static partial class Oleaut32
+    [ComImport]
+    [Guid("00020404-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public unsafe interface IEnumVariant
     {
-        [ComImport]
-        [Guid("00020404-0000-0000-C000-000000000046")]
-        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        public unsafe interface IEnumVariant
-        {
-            [PreserveSig]
-            HRESULT Next(
-                uint celt,
-                IntPtr rgVar,
-                uint* pCeltFetched);
+        [PreserveSig]
+        HResult Next(uint celt, IntPtr rgVar, uint* pCeltFetched);
 
-            [PreserveSig]
-            HRESULT Skip(
-                uint celt);
+        [PreserveSig]
+        HResult Skip(uint celt);
 
-            [PreserveSig]
-            HRESULT Reset();
+        [PreserveSig]
+        HResult Reset();
 
-            [PreserveSig]
-            HRESULT Clone(
-                [Out, MarshalAs(UnmanagedType.LPArray)] IEnumVariant[]? ppEnum);
-        }
+        [PreserveSig]
+        HResult Clone([Out, MarshalAs(UnmanagedType.LPArray)] IEnumVariant[]? ppEnum);
     }
-}
-
 }
